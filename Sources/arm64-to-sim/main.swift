@@ -29,22 +29,6 @@ extension FileHandle {
     }
 }
 
-// a pair of Data and data offset that can be used to represent ongoing changes to the binary
-class DataOffsetPair {
-    private(set) var data: Data
-    private(set) var offset: UInt32
-    
-    init(_ data: Data = Data(), _ offset: UInt32 = 0) {
-        self.data = data
-        self.offset = offset
-    }
-    
-    func merge(_ dop: DataOffsetPair) {
-        self.data.append(dop.data)
-        self.offset += dop.offset
-    }
-}
-
 enum Transmogrifier {
     private static func readBinary(atPath path: String) -> (Data, [Data], Data) {
         guard let handle = FileHandle(forReadingAtPath: path) else {
@@ -71,24 +55,24 @@ enum Transmogrifier {
         return (headerData, loadCommandsData, programData)
     }
     
-    private static func updateSegment64(_ dop: DataOffsetPair) -> DataOffsetPair {
+    private static func updateSegment64(_ data: Data, _ offset: UInt32) -> Data {
         // decode both the segment_command_64 and the subsequent section_64s
-        var segment: segment_command_64 = dop.data.asStruct()
+        var segment: segment_command_64 = data.asStruct()
         
         let sections: [section_64] = (0..<Int(segment.nsects)).map { index in
             let offset = MemoryLayout<segment_command_64>.stride + index * MemoryLayout<section_64>.stride
-            return dop.data.asStruct(fromByteOffset: offset)
+            return data.asStruct(fromByteOffset: offset)
         }
         
-        // shift segment information by 8 bytes
-        segment.fileoff += UInt64(dop.offset)
-        segment.filesize += UInt64(dop.offset)
-        segment.vmsize += UInt64(dop.offset)
+        // shift segment information by the offset
+        segment.fileoff += UInt64(offset)
+        segment.filesize += UInt64(offset)
+        segment.vmsize += UInt64(offset)
         
         let offsetSections = sections.map { section -> section_64 in
             var section = section
-            section.offset += 8
-            section.reloff += section.reloff > 0 ? 8 : 0
+            section.offset += UInt32(offset)
+            section.reloff += section.reloff > 0 ? UInt32(offset) : 0
             return section
         }
         
@@ -99,10 +83,10 @@ enum Transmogrifier {
             return Data(bytes: &section, count: MemoryLayout<section_64>.stride)
         })
         
-        return DataOffsetPair(datas.reduce(into: Data()) { $0.append($1) })
+        return datas.reduce(into: Data()) { $0.append($1) }
     }
     
-    private static func updateVersionMin(_ dop: DataOffsetPair) -> DataOffsetPair {
+    private static func updateVersionMin(_ data: Data, _ offset: UInt32) -> Data {
         var command = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
                                             cmdsize: UInt32(MemoryLayout<build_version_command>.stride),
                                             platform: UInt32(PLATFORM_IOSSIMULATOR),
@@ -110,44 +94,47 @@ enum Transmogrifier {
                                             sdk: 13 << 16 | 0 << 8 | 0,
                                             ntools: 0)
         
-        return DataOffsetPair(Data(bytes: &command, count: MemoryLayout<build_version_command>.stride), 8)
+        return Data(bytes: &command, count: MemoryLayout<build_version_command>.stride)
     }
     
-    private static func updateDataInCode(_ dop: DataOffsetPair) -> DataOffsetPair {
-        var command: linkedit_data_command = dop.data.asStruct()
-        command.dataoff += dop.offset
-        return DataOffsetPair(Data(bytes: &command, count: dop.data.commandSize))
+    private static func updateDataInCode(_ data: Data, _ offset: UInt32) -> Data {
+        var command: linkedit_data_command = data.asStruct()
+        command.dataoff += offset
+        return Data(bytes: &command, count: data.commandSize)
     }
     
-    private static func updateSymTab(_ dop: DataOffsetPair) -> DataOffsetPair {
-        var command: symtab_command = dop.data.asStruct()
-        command.stroff += dop.offset
-        command.symoff += dop.offset
-        return DataOffsetPair(Data(bytes: &command, count: dop.data.commandSize))
+    private static func updateSymTab(_ data: Data, _ offset: UInt32) -> Data {
+        var command: symtab_command = data.asStruct()
+        command.stroff += offset
+        command.symoff += offset
+        return Data(bytes: &command, count: data.commandSize)
     }
     
     static func processBinary(atPath path: String) {
         let (headerData, loadCommandsData, programData) = readBinary(atPath: path)
         
+        // `offset` is kind of a magic number here, since we know that's the only meaningful change to binary size
+        // having a dynamic `offset` requires two passes over the load commands and is left as an exercise to the reader
+        let offset = UInt32(abs(MemoryLayout<build_version_command>.stride - MemoryLayout<version_min_command>.stride))
+        
         let editedCommandsData = loadCommandsData
-            .reduce(into: DataOffsetPair()) { (dop, lc) -> () in
-                let lco = DataOffsetPair(lc, dop.offset)
+            .map { (lc) -> Data in
                 switch Int32(lc.loadCommand) {
                 case LC_SEGMENT_64:
-                    dop.merge(updateSegment64(lco))
+                    return updateSegment64(lc, offset)
                 case LC_VERSION_MIN_IPHONEOS:
-                    dop.merge(updateVersionMin(lco))
+                    return updateVersionMin(lc, offset)
                 case LC_DATA_IN_CODE, LC_LINKER_OPTIMIZATION_HINT:
-                    dop.merge(updateDataInCode(lco))
+                    return updateDataInCode(lc, offset)
                 case LC_SYMTAB:
-                    dop.merge(updateSymTab(lco))
+                    return updateSymTab(lc, offset)
                 case LC_BUILD_VERSION:
                     fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
                 default:
-                    dop.merge(lco)
+                    return lc
                 }
             }
-            .data
+            .reduce(into: Data()) { $0.append($1) }
         
         var header: mach_header_64 = headerData.asStruct()
         header.sizeofcmds = UInt32(editedCommandsData.count)
