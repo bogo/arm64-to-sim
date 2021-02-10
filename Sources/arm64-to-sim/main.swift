@@ -18,6 +18,12 @@ extension Data {
     }
 }
 
+extension Array where Element == Data {
+    func merge() -> Data {
+        return reduce(into: Data()) { $0.append($1) }
+    }
+}
+
 // support peeking at Data contents
 extension FileHandle {
     func peek(upToCount count: Int) throws -> Data? {
@@ -83,7 +89,7 @@ enum Transmogrifier {
             return Data(bytes: &section, count: MemoryLayout<section_64>.stride)
         })
         
-        return datas.reduce(into: Data()) { $0.append($1) }
+        return datas.merge()
     }
     
     private static func updateVersionMin(_ data: Data, _ offset: UInt32) -> Data {
@@ -134,7 +140,7 @@ enum Transmogrifier {
                     return lc
                 }
             }
-            .reduce(into: Data()) { $0.append($1) }
+            .merge()
         
         var header: mach_header_64 = headerData.asStruct()
         header.sizeofcmds = UInt32(editedCommandsData.count)
@@ -144,7 +150,7 @@ enum Transmogrifier {
             Data(bytes: &header, count: MemoryLayout<mach_header_64>.stride),
             editedCommandsData,
             programData
-        ].reduce(into: Data()) { $0.append($1) }
+        ].merge()
         
         // save back to disk
         try! reworkedData.write(to: URL(fileURLWithPath: path))
