@@ -125,16 +125,16 @@ enum Transmogrifier {
         
         let editedCommandsData = loadCommandsData
             .map { (lc) -> Data in
-                switch Int32(lc.loadCommand) {
-                case LC_SEGMENT_64:
+                switch lc.loadCommand {
+                case UInt32(LC_SEGMENT_64):
                     return updateSegment64(lc, offset)
-                case LC_VERSION_MIN_IPHONEOS:
+                case UInt32(LC_VERSION_MIN_IPHONEOS):
                     return updateVersionMin(lc, offset)
-                case LC_DATA_IN_CODE, LC_LINKER_OPTIMIZATION_HINT:
+                case UInt32(LC_DATA_IN_CODE), UInt32(LC_LINKER_OPTIMIZATION_HINT):
                     return updateDataInCode(lc, offset)
-                case LC_SYMTAB:
+                case UInt32(LC_SYMTAB):
                     return updateSymTab(lc, offset)
-                case LC_BUILD_VERSION:
+                case UInt32(LC_BUILD_VERSION):
                     fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
                 default:
                     return lc
