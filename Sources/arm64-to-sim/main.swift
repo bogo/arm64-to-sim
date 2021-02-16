@@ -116,6 +116,31 @@ enum Transmogrifier {
         return Data(bytes: &command, count: data.commandSize)
     }
     
+    private static func updateDySymTab(_ data: Data, _ offset: UInt32) -> Data {
+        var command: dysymtab_command = data.asStruct()
+        command.modtaboff += offset
+        command.tocoff += offset
+        command.extreloff += offset
+        command.locreloff += offset
+        command.extrefsymoff += offset
+        command.indirectsymoff += offset
+        return Data(bytes: &command, count: data.commandSize)
+    }
+
+    private static func updateDyLdInfoOnly(_ data: Data, _ offset: UInt32) -> Data {
+        var command: dyld_info_command = data.asStruct()
+        command.bind_off += offset
+        command.rebase_off += offset
+        command.export_off += offset
+        command.weak_bind_off += offset
+        command.lazy_bind_off += offset
+        return Data(bytes: &command, count: data.commandSize)
+    }
+    private static func updateDylib(_ data: Data, _ offset: UInt32) -> Data {
+        var command: dylib_command = data.asStruct()
+        return Data(bytes: &command, count: data.commandSize)
+    }
+
     static func processBinary(atPath path: String) {
         let (headerData, loadCommandsData, programData) = readBinary(atPath: path)
         
@@ -125,23 +150,50 @@ enum Transmogrifier {
         
         let editedCommandsData = loadCommandsData
             .map { (lc) -> Data in
+                print("lc: (command:\(lc.loadCommand), size:\(lc.commandSize)")
                 switch lc.loadCommand {
                 case UInt32(LC_SEGMENT_64):
+                    print("LC_SEGMENT_64")
                     return updateSegment64(lc, offset)
                 case UInt32(LC_VERSION_MIN_IPHONEOS):
+                    print("LC_VERSION_MIN_IPHONEOS")
                     return updateVersionMin(lc, offset)
                 case UInt32(LC_DATA_IN_CODE), UInt32(LC_LINKER_OPTIMIZATION_HINT):
+                    print("LC_DATA_IN_CODE|LC_LINKER_OPTIMIZATION_HINT")
                     return updateDataInCode(lc, offset)
                 case UInt32(LC_SYMTAB):
+                    print("LC_SYMTAB")
                     return updateSymTab(lc, offset)
                 case UInt32(LC_BUILD_VERSION):
+                    print("LC_BUILD_VERSION")
                     fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
+                case UInt32(LC_ID_DYLIB), UInt32(LC_LOAD_DYLIB):
+                    print("LC_ID_DYLIB|LC_LOAD_DYLIB")
+//                    return updateDylib(lc, offset)
+                    return lc
+                case UInt32(LC_DYLD_INFO_ONLY):
+                    print("LC_DYLD_INFO_ONLY")
+                    return updateDyLdInfoOnly(lc, offset)
+                case UInt32(LC_DYSYMTAB):
+                    print("LC_DYSYMTAB")
+                    return updateDySymTab(lc, offset)
+                case UInt32(LC_SOURCE_VERSION):
+                    print("LC_SOURCE_VERSION")
+                    return lc
+                case UInt32(LC_UUID):
+                    print("LC_UUID")
+                    return lc
+                case UInt32(LC_VERSION_MIN_IPHONEOS):
+                    print("LC_VERSION_MIN_IPHONEOS")
+                    return lc
+                case UInt32(LC_FUNCTION_STARTS):
+                    print("LC_FUNCTION_STARTS")
+                    return lc
                 default:
                     return lc
                 }
             }
             .merge()
-        
         var header: mach_header_64 = headerData.asStruct()
         header.sizeofcmds = UInt32(editedCommandsData.count)
         
