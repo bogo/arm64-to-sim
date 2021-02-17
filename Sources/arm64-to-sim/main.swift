@@ -54,6 +54,8 @@ enum Transmogrifier {
             return try! handle.read(upToCount: Int(loadCommandPeekData!.commandSize))!
         }
         
+        // discard 8 empty bytes that should exist here
+        _ = handle.readData(ofLength: 8)
         let programData = try! handle.readToEnd()!
         
         try! handle.close()
@@ -152,18 +154,18 @@ enum Transmogrifier {
             .map { (lc) -> Data in
                 print("lc: (command:\(lc.loadCommand), size:\(lc.commandSize)")
                 switch lc.loadCommand {
-                case UInt32(LC_SEGMENT_64):
-                    print("LC_SEGMENT_64")
-                    return updateSegment64(lc, offset)
+//                case UInt32(LC_SEGMENT_64):
+//                    print("LC_SEGMENT_64")
+//                    return updateSegment64(lc, offset)
                 case UInt32(LC_VERSION_MIN_IPHONEOS):
                     print("LC_VERSION_MIN_IPHONEOS")
                     return updateVersionMin(lc, offset)
-                case UInt32(LC_DATA_IN_CODE), UInt32(LC_LINKER_OPTIMIZATION_HINT):
-                    print("LC_DATA_IN_CODE|LC_LINKER_OPTIMIZATION_HINT")
-                    return updateDataInCode(lc, offset)
-                case UInt32(LC_SYMTAB):
-                    print("LC_SYMTAB")
-                    return updateSymTab(lc, offset)
+//                case UInt32(LC_DATA_IN_CODE), UInt32(LC_LINKER_OPTIMIZATION_HINT):
+//                    print("LC_DATA_IN_CODE|LC_LINKER_OPTIMIZATION_HINT")
+//                    return updateDataInCode(lc, offset)
+//                case UInt32(LC_SYMTAB):
+//                    print("LC_SYMTAB")
+//                    return updateSymTab(lc, offset)
                 case UInt32(LC_BUILD_VERSION):
                     print("LC_BUILD_VERSION")
                     fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
@@ -171,12 +173,12 @@ enum Transmogrifier {
                     print("LC_ID_DYLIB|LC_LOAD_DYLIB")
 //                    return updateDylib(lc, offset)
                     return lc
-                case UInt32(LC_DYLD_INFO_ONLY):
-                    print("LC_DYLD_INFO_ONLY")
-                    return updateDyLdInfoOnly(lc, offset)
-                case UInt32(LC_DYSYMTAB):
-                    print("LC_DYSYMTAB")
-                    return updateDySymTab(lc, offset)
+//                case UInt32(LC_DYLD_INFO_ONLY):
+//                    print("LC_DYLD_INFO_ONLY")
+//                    return updateDyLdInfoOnly(lc, offset)
+//                case UInt32(LC_DYSYMTAB):
+//                    print("LC_DYSYMTAB")
+//                    return updateDySymTab(lc, offset)
                 case UInt32(LC_SOURCE_VERSION):
                     print("LC_SOURCE_VERSION")
                     return lc
