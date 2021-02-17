@@ -2,6 +2,13 @@
 
 A simple command-line tool for hacking native ARM64 binaries to run on the Apple Silicon iOS Simulator.
 
+# Documentation
+Read this two articles by the arm64-to-sim creator @bogo
+
+* https://bogo.wtf/arm64-to-sim.html
+
+* https://bogo.wtf/arm64-to-sim-dylibs.html
+
 # How to create a .xcframework
 
 Steps to create a xcframework including an arm64-simulator version from a arm64 framework already existent.
