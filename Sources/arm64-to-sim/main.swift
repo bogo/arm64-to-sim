@@ -55,7 +55,8 @@ enum Transmogrifier {
         }
         
         // discard 8 empty bytes that should exist here
-        _ = handle.readData(ofLength: 8)
+        let bytesToDiscard = abs(MemoryLayout<build_version_command>.stride - MemoryLayout<version_min_command>.stride)
+        _ = handle.readData(ofLength: bytesToDiscard)
         let programData = try! handle.readToEnd()!
         
         try! handle.close()
