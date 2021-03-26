@@ -95,12 +95,12 @@ enum Transmogrifier {
         return datas.merge()
     }
     
-    private static func updateVersionMin(_ data: Data, _ offset: UInt32) -> Data {
+    private static func updateVersionMin(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
         var command = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
                                             cmdsize: UInt32(MemoryLayout<build_version_command>.stride),
                                             platform: UInt32(PLATFORM_IOSSIMULATOR),
-                                            minos: 13 << 16 | 0 << 8 | 0,
-                                            sdk: 13 << 16 | 0 << 8 | 0,
+                                            minos: minos << 16 | 0 << 8 | 0,
+                                            sdk: sdk << 16 | 0 << 8 | 0,
                                             ntools: 0)
         
         return Data(bytes: &command, count: MemoryLayout<build_version_command>.stride)
@@ -144,7 +144,10 @@ enum Transmogrifier {
         return Data(bytes: &command, count: data.commandSize)
     }
 
-    static func processBinary(atPath path: String) {
+    static func processBinary(atPath path: String, minos: UInt32 = 13, sdk: UInt32 = 13) {
+        guard CommandLine.arguments.count > 1 else {
+            fatalError("Please add a path to command!")
+        }
         let (headerData, loadCommandsData, programData) = readBinary(atPath: path)
         
         // `offset` is kind of a magic number here, since we know that's the only meaningful change to binary size
@@ -160,7 +163,7 @@ enum Transmogrifier {
 //                    return updateSegment64(lc, offset)
                 case UInt32(LC_VERSION_MIN_IPHONEOS):
                     print("LC_VERSION_MIN_IPHONEOS")
-                    return updateVersionMin(lc, offset)
+                    return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
 //                case UInt32(LC_DATA_IN_CODE), UInt32(LC_LINKER_OPTIMIZATION_HINT):
 //                    print("LC_DATA_IN_CODE|LC_LINKER_OPTIMIZATION_HINT")
 //                    return updateDataInCode(lc, offset)
@@ -213,4 +216,6 @@ enum Transmogrifier {
 }
 
 let binaryPath = CommandLine.arguments[1]
-Transmogrifier.processBinary(atPath: binaryPath)
+let minos = UInt32(CommandLine.arguments[2]) ?? 13
+let sdk = UInt32(CommandLine.arguments[3]) ?? 13
+Transmogrifier.processBinary(atPath: binaryPath, minos: minos, sdk: sdk)
