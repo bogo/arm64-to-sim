@@ -54,6 +54,9 @@ enum Transmogrifier {
             return try! handle.read(upToCount: Int(loadCommandPeekData!.commandSize))!
         }
         
+        // discard 8 empty bytes that should exist here
+        let bytesToDiscard = abs(MemoryLayout<build_version_command>.stride - MemoryLayout<version_min_command>.stride)
+        _ = handle.readData(ofLength: bytesToDiscard)
         let programData = try! handle.readToEnd()!
         
         try! handle.close()
@@ -92,12 +95,12 @@ enum Transmogrifier {
         return datas.merge()
     }
     
-    private static func updateVersionMin(_ data: Data, _ offset: UInt32) -> Data {
+    private static func updateVersionMin(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
         var command = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
                                             cmdsize: UInt32(MemoryLayout<build_version_command>.stride),
                                             platform: UInt32(PLATFORM_IOSSIMULATOR),
-                                            minos: 13 << 16 | 0 << 8 | 0,
-                                            sdk: 13 << 16 | 0 << 8 | 0,
+                                            minos: minos << 16 | 0 << 8 | 0,
+                                            sdk: sdk << 16 | 0 << 8 | 0,
                                             ntools: 0)
         
         return Data(bytes: &command, count: MemoryLayout<build_version_command>.stride)
@@ -116,7 +119,35 @@ enum Transmogrifier {
         return Data(bytes: &command, count: data.commandSize)
     }
     
-    static func processBinary(atPath path: String) {
+    private static func updateDySymTab(_ data: Data, _ offset: UInt32) -> Data {
+        var command: dysymtab_command = data.asStruct()
+        command.modtaboff += offset
+        command.tocoff += offset
+        command.extreloff += offset
+        command.locreloff += offset
+        command.extrefsymoff += offset
+        command.indirectsymoff += offset
+        return Data(bytes: &command, count: data.commandSize)
+    }
+
+    private static func updateDyLdInfoOnly(_ data: Data, _ offset: UInt32) -> Data {
+        var command: dyld_info_command = data.asStruct()
+        command.bind_off += offset
+        command.rebase_off += offset
+        command.export_off += offset
+        command.weak_bind_off += offset
+        command.lazy_bind_off += offset
+        return Data(bytes: &command, count: data.commandSize)
+    }
+    private static func updateDylib(_ data: Data, _ offset: UInt32) -> Data {
+        var command: dylib_command = data.asStruct()
+        return Data(bytes: &command, count: data.commandSize)
+    }
+
+    static func processBinary(atPath path: String, minos: UInt32 = 13, sdk: UInt32 = 13) {
+        guard CommandLine.arguments.count > 1 else {
+            fatalError("Please add a path to command!")
+        }
         let (headerData, loadCommandsData, programData) = readBinary(atPath: path)
         
         // `offset` is kind of a magic number here, since we know that's the only meaningful change to binary size
@@ -125,23 +156,50 @@ enum Transmogrifier {
         
         let editedCommandsData = loadCommandsData
             .map { (lc) -> Data in
-                switch Int32(lc.loadCommand) {
-                case LC_SEGMENT_64:
-                    return updateSegment64(lc, offset)
-                case LC_VERSION_MIN_IPHONEOS:
-                    return updateVersionMin(lc, offset)
-                case LC_DATA_IN_CODE, LC_LINKER_OPTIMIZATION_HINT:
-                    return updateDataInCode(lc, offset)
-                case LC_SYMTAB:
-                    return updateSymTab(lc, offset)
-                case LC_BUILD_VERSION:
+                print("lc: (command:\(lc.loadCommand), size:\(lc.commandSize)")
+                switch lc.loadCommand {
+//                case UInt32(LC_SEGMENT_64):
+//                    print("LC_SEGMENT_64")
+//                    return updateSegment64(lc, offset)
+                case UInt32(LC_VERSION_MIN_IPHONEOS):
+                    print("LC_VERSION_MIN_IPHONEOS")
+                    return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+//                case UInt32(LC_DATA_IN_CODE), UInt32(LC_LINKER_OPTIMIZATION_HINT):
+//                    print("LC_DATA_IN_CODE|LC_LINKER_OPTIMIZATION_HINT")
+//                    return updateDataInCode(lc, offset)
+//                case UInt32(LC_SYMTAB):
+//                    print("LC_SYMTAB")
+//                    return updateSymTab(lc, offset)
+                case UInt32(LC_BUILD_VERSION):
+                    print("LC_BUILD_VERSION")
                     fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
+                case UInt32(LC_ID_DYLIB), UInt32(LC_LOAD_DYLIB):
+                    print("LC_ID_DYLIB|LC_LOAD_DYLIB")
+//                    return updateDylib(lc, offset)
+                    return lc
+//                case UInt32(LC_DYLD_INFO_ONLY):
+//                    print("LC_DYLD_INFO_ONLY")
+//                    return updateDyLdInfoOnly(lc, offset)
+//                case UInt32(LC_DYSYMTAB):
+//                    print("LC_DYSYMTAB")
+//                    return updateDySymTab(lc, offset)
+                case UInt32(LC_SOURCE_VERSION):
+                    print("LC_SOURCE_VERSION")
+                    return lc
+                case UInt32(LC_UUID):
+                    print("LC_UUID")
+                    return lc
+                case UInt32(LC_VERSION_MIN_IPHONEOS):
+                    print("LC_VERSION_MIN_IPHONEOS")
+                    return lc
+                case UInt32(LC_FUNCTION_STARTS):
+                    print("LC_FUNCTION_STARTS")
+                    return lc
                 default:
                     return lc
                 }
             }
             .merge()
-        
         var header: mach_header_64 = headerData.asStruct()
         header.sizeofcmds = UInt32(editedCommandsData.count)
         
@@ -158,4 +216,6 @@ enum Transmogrifier {
 }
 
 let binaryPath = CommandLine.arguments[1]
-Transmogrifier.processBinary(atPath: binaryPath)
+let minos = UInt32(CommandLine.arguments[2]) ?? 13
+let sdk = UInt32(CommandLine.arguments[3]) ?? 13
+Transmogrifier.processBinary(atPath: binaryPath, minos: minos, sdk: sdk)
