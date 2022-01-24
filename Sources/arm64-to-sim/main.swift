@@ -36,7 +36,7 @@ extension FileHandle {
 }
 
 enum Transmogrifier {
-    private static func readBinary(atPath path: String) -> (Data, [Data], Data) {
+    private static func readBinary(atPath path: String, isDynamic: Bool = false) -> (Data, [Data], Data) {
         guard let handle = FileHandle(forReadingAtPath: path) else {
             fatalError("Cannot open a handle for the file at \(path). Aborting.")
         }
@@ -54,6 +54,11 @@ enum Transmogrifier {
             return try! handle.read(upToCount: Int(loadCommandPeekData!.commandSize))!
         }
         
+        if isDynamic {
+            let bytesToDiscard = abs(MemoryLayout<build_version_command>.stride - MemoryLayout<version_min_command>.stride)
+            _ = handle.readData(ofLength: bytesToDiscard)
+        }
+
         let programData = try! handle.readToEnd()!
         
         try! handle.close()
@@ -116,11 +121,8 @@ enum Transmogrifier {
         return Data(bytes: &command, count: data.commandSize)
     }
     
-    static func processBinary(atPath path: String, minos: UInt32 = 13, sdk: UInt32 = 13) {
-        guard CommandLine.arguments.count > 1 else {
-            fatalError("Please add a path to command!")
-        }
-        let (headerData, loadCommandsData, programData) = readBinary(atPath: path)
+    static func processBinary(atPath path: String, minos: UInt32 = 13, sdk: UInt32 = 13, isDynamic: Bool = false) {
+        let (headerData, loadCommandsData, programData) = readBinary(atPath: path, isDynamic: isDynamic)
         
         // `offset` is kind of a magic number here, since we know that's the only meaningful change to binary size
         // having a dynamic `offset` requires two passes over the load commands and is left as an exercise to the reader
@@ -128,17 +130,23 @@ enum Transmogrifier {
         
         let editedCommandsData = loadCommandsData
             .map { (lc) -> Data in
-                switch Int32(lc.loadCommand) {
+                let cmd = Int32(bitPattern: lc.loadCommand)
+                guard cmd != LC_BUILD_VERSION else {
+                    fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
+                }
+                if cmd == LC_VERSION_MIN_IPHONEOS {
+                    return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+                }
+                if isDynamic {
+                    return lc
+                }
+                switch cmd {
                 case LC_SEGMENT_64:
                     return updateSegment64(lc, offset)
-                case LC_VERSION_MIN_IPHONEOS:
-                    return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
                 case LC_DATA_IN_CODE, LC_LINKER_OPTIMIZATION_HINT:
                     return updateDataInCode(lc, offset)
                 case LC_SYMTAB:
                     return updateSymTab(lc, offset)
-                case LC_BUILD_VERSION:
-                    fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
                 default:
                     return lc
                 }
@@ -160,7 +168,15 @@ enum Transmogrifier {
     }
 }
 
+guard CommandLine.arguments.count > 1 else {
+    fatalError("Please add a path to command!")
+}
+
 let binaryPath = CommandLine.arguments[1]
-let minos = UInt32(CommandLine.arguments[2]) ?? 13
-let sdk = UInt32(CommandLine.arguments[3]) ?? 13
-Transmogrifier.processBinary(atPath: binaryPath, minos: minos, sdk: sdk)
+let minos = (CommandLine.arguments.count > 2 ? UInt32(CommandLine.arguments[2]) : nil) ?? 12
+let sdk = (CommandLine.arguments.count > 3 ? UInt32(CommandLine.arguments[3]) : nil) ?? 13
+let isDynamic = (CommandLine.arguments.count > 4 ? Bool(CommandLine.arguments[4]) : nil) ?? false
+if isDynamic {
+    print("[arm64-to-sim] notice: running in dynamic framework mode")
+}
+Transmogrifier.processBinary(atPath: binaryPath, minos: minos, sdk: sdk, isDynamic: isDynamic)
