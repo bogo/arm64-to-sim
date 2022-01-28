@@ -77,8 +77,10 @@ enum Transmogrifier {
         
         let offsetSections = sections.map { section -> section_64 in
             var section = section
-            section.offset += UInt32(offset)
-            section.reloff += section.reloff > 0 ? UInt32(offset) : 0
+            if section.flags != S_ZEROFILL {
+                section.offset += UInt32(offset)
+                section.reloff += section.reloff > 0 ? UInt32(offset) : 0
+            }
             return section
         }
         
