@@ -14,6 +14,15 @@ let package = Package(
     targets: [
         .target(
             name: "arm64-to-sim",
+            dependencies: [ "Arm64ToSimLib" ]),
+        .target(
+            name: "Arm64ToSimLib",
             dependencies: []),
+        .testTarget(
+          name: "Tests",
+          dependencies: ["Arm64ToSimLib"],
+          resources: [
+            .copy("TestResources"),
+          ])
     ]
 )
