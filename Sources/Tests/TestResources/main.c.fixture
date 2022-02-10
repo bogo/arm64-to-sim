@@ -1,0 +1,5 @@
+#include "return2.h"
+
+int main() {
+  return return2();
+}

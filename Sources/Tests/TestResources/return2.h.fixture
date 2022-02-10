@@ -1,0 +1,6 @@
+#ifndef Header_h
+#define Header_h
+
+int return2();
+
+#endif
