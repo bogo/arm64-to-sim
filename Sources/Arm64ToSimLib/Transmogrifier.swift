@@ -104,7 +104,7 @@ public enum Transmogrifier {
         return datas.merge()
     }
 
-    private static func updateVersionMin(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
+    private static func createLcBuildVersion(minos: UInt32, sdk: UInt32) -> Data {
         var command = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
                                             cmdsize: UInt32(MemoryLayout<build_version_command>.stride),
                                             platform: UInt32(PLATFORM_IOSSIMULATOR),
@@ -113,6 +113,15 @@ public enum Transmogrifier {
                                             ntools: 0)
 
         return Data(bytes: &command, count: MemoryLayout<build_version_command>.stride)
+    }
+
+    private static func updateLcBuildVersion(_ data: Data, minos: UInt32, sdk: UInt32) -> Data {
+        var command: build_version_command = data.asStruct()
+        command.platform = UInt32(PLATFORM_IOSSIMULATOR)
+        command.minos = minos << 16 | 0 << 8 | 0
+        command.sdk = sdk << 16 | 0 << 8 | 0
+
+        return Data(bytes: &command, count: data.count)
     }
 
     private static func updateDataInCode(_ data: Data, _ offset: UInt32) -> Data {
@@ -154,8 +163,6 @@ public enum Transmogrifier {
     }
 
     if contains_LC_VERSION_MIN_IPHONEOS {
-      // `offset` is kind of a magic number here, since we know that's the only meaningful change to binary size
-      // having a dynamic `offset` requires two passes over the load commands and is left as an exercise to the reader
       return updatePreiOS12ObjectFile
     } else {
       return updatePostiOS12ObjectFile
@@ -167,7 +174,7 @@ public enum Transmogrifier {
       let cmd = Int32(bitPattern: lc.loadCommand)
       switch cmd {
       case LC_BUILD_VERSION:
-          return updateVersionMin(lc, 0, minos: minos, sdk: sdk)
+          return updateLcBuildVersion(lc, minos: minos, sdk: sdk)
       default:
           return lc
       }
@@ -182,28 +189,25 @@ public enum Transmogrifier {
           case LC_SEGMENT_64:
               return updateSegment64(lc, offset)
           case LC_VERSION_MIN_IPHONEOS:
-              return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+              return createLcBuildVersion(minos: minos, sdk: sdk)
           case LC_DATA_IN_CODE, LC_LINKER_OPTIMIZATION_HINT:
               return updateDataInCode(lc, offset)
           case LC_SYMTAB:
               return updateSymTab(lc, offset)
           case LC_BUILD_VERSION:
-              return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+              fatalError("pre-12 object file shold not contain LC_BUILD_VERSION!")
           default:
               return lc
       }
   }
 
   static func updateDylibFile(lc: Data, minos: UInt32, sdk: UInt32) -> Data {
-    // `offset` is kind of a magic number here, since we know that's the only meaningful change to binary size
-    // having a dynamic `offset` requires two passes over the load commands and is left as an exercise to the reader
-    let offset = UInt32(abs(MemoryLayout<build_version_command>.stride - MemoryLayout<version_min_command>.stride))
     let cmd = Int32(bitPattern: lc.loadCommand)
     guard cmd != LC_BUILD_VERSION else {
         fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
     }
     if cmd == LC_VERSION_MIN_IPHONEOS {
-        return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+        return createLcBuildVersion(minos: minos, sdk: sdk)
     }
     return lc
   }
