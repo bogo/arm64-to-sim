@@ -105,14 +105,34 @@ public enum Transmogrifier {
     }
 
     private static func updateVersionMin(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
-        var command = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
-                                            cmdsize: UInt32(MemoryLayout<build_version_command>.stride),
-                                            platform: UInt32(PLATFORM_IOSSIMULATOR),
-                                            minos: minos << 16 | 0 << 8 | 0,
-                                            sdk: sdk << 16 | 0 << 8 | 0,
-                                            ntools: 0)
+        // read data into build_version_command and multiple build_tool_version 
+        var bvc: build_version_command = data.asStruct()
+        var btvs = [build_tool_version]()
+        if bvc.cmdsize == (UInt32(MemoryLayout<build_version_command>.stride) + bvc.ntools * UInt32(MemoryLayout<build_tool_version>.stride)) {
+            if bvc.ntools > 0 {
+                for i in 0...bvc.ntools-1 {
+                    var btv: build_tool_version = data.asStruct(fromByteOffset: MemoryLayout<build_version_command>.stride + Int(i) * MemoryLayout<build_tool_version>.stride)
+                    btvs.append(btv)
+                }
+            }
+        }
+        bvc.minos = minos << 16 | 0 << 8 | 0
+        bvc.sdk = sdk << 16 | 0 << 8 | 0
+        bvc.platform = UInt32(PLATFORM_IOSSIMULATOR)
+        if bvc.cmd != UInt32(LC_BUILD_VERSION) { 
+            bvc.ntools = 0
+        }
+        bvc.cmd = UInt32(LC_BUILD_VERSION)
+        bvc.cmdsize = (UInt32(MemoryLayout<build_version_command>.stride) + bvc.ntools * UInt32(MemoryLayout<build_tool_version>.stride))
+        
+        var datas = [Data]()
+        datas.append(Data(bytes: &bvc, count: MemoryLayout<build_version_command>.stride))
+        for btv in btvs { 
+            var btv = btv
+            datas.append(Data(bytes: &btv, count: MemoryLayout<build_tool_version>.stride))
+        }
 
-        return Data(bytes: &command, count: MemoryLayout<build_version_command>.stride)
+        return datas.merge()    
     }
 
     private static func updateDataInCode(_ data: Data, _ offset: UInt32) -> Data {
@@ -125,6 +145,11 @@ public enum Transmogrifier {
         var command: symtab_command = data.asStruct()
         command.stroff += offset
         command.symoff += offset
+        return Data(bytes: &command, count: data.commandSize)
+    }
+
+    private static func updateDynamicSymTab(_ data: Data, _ offset: UInt32) -> Data {
+        var command: dysymtab_command = data.asStruct()
         return Data(bytes: &command, count: data.commandSize)
     }
 
@@ -165,11 +190,12 @@ public enum Transmogrifier {
 
   static func updatePostiOS12ObjectFile(lc: Data, minos: UInt32, sdk: UInt32) -> Data {
       let cmd = Int32(bitPattern: lc.loadCommand)
-      switch cmd {
-      case LC_BUILD_VERSION:
-          return updateVersionMin(lc, 0, minos: minos, sdk: sdk)
-      default:
-          return lc
+      let offset = UInt32(0)
+      switch  cmd {
+        case LC_BUILD_VERSION:
+            return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+        default:
+            return lc
       }
   }
 
@@ -189,6 +215,8 @@ public enum Transmogrifier {
               return updateSymTab(lc, offset)
           case LC_BUILD_VERSION:
               return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+        //   case LC_DYSYMTAB:
+        //       return updateDynamicSymTab(lc, offset)
           default:
               return lc
       }
