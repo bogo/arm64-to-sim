@@ -148,11 +148,6 @@ public enum Transmogrifier {
         return Data(bytes: &command, count: data.commandSize)
     }
 
-    private static func updateDynamicSymTab(_ data: Data, _ offset: UInt32) -> Data {
-        var command: dysymtab_command = data.asStruct()
-        return Data(bytes: &command, count: data.commandSize)
-    }
-
   private static func computeLoadCommandsEditor(_ loadCommandsData: [Data], isDynamic: Bool) -> ((Data, UInt32, UInt32) -> Data) {
 
     if isDynamic {
@@ -215,8 +210,6 @@ public enum Transmogrifier {
               return updateSymTab(lc, offset)
           case LC_BUILD_VERSION:
               return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
-        //   case LC_DYSYMTAB:
-        //       return updateDynamicSymTab(lc, offset)
           default:
               return lc
       }
