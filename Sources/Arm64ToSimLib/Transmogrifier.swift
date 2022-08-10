@@ -105,14 +105,28 @@ public enum Transmogrifier {
     }
 
     private static func updateVersionMin(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
-        var command = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
-                                            cmdsize: UInt32(MemoryLayout<build_version_command>.stride),
-                                            platform: UInt32(PLATFORM_IOSSIMULATOR),
-                                            minos: minos << 16 | 0 << 8 | 0,
-                                            sdk: sdk << 16 | 0 << 8 | 0,
-                                            ntools: 0)
 
-        return Data(bytes: &command, count: MemoryLayout<build_version_command>.stride)
+        // a build version command consists of 2 parts: the build version header, and an optional list of 'build tool' headers.
+        // see https://opensource.apple.com/source/dyld/dyld-519.2.1/dyld3/MachOParser.cpp for the struct definition.
+
+        // In order to ensure we don't change the size of the command, 
+        // let's just mutate use the memory we already allocated when we read the command in from the object file.
+        var data = data
+
+        // Make a struct value we can mutate
+        var new_command : build_version_command = data.asStruct()
+
+        new_command.cmd = UInt32(LC_BUILD_VERSION)
+        new_command.platform = UInt32(PLATFORM_IOSSIMULATOR)
+        new_command.minos = minos << 16 | 0 << 8 | 0
+        new_command.sdk = sdk << 16 | 0 << 8 | 0
+
+        // commit our changes to the original command
+        let new_data = Data(bytes: &new_command, count: MemoryLayout<build_version_command>.stride)
+        let replace_range : Range<Data.Index> = 0..<MemoryLayout<build_version_command>.stride
+        data.replaceSubrange(replace_range, with: new_data)
+
+        return data
     }
 
     private static func updateDataInCode(_ data: Data, _ offset: UInt32) -> Data {
