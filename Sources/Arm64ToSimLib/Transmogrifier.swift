@@ -104,12 +104,23 @@ public enum Transmogrifier {
         return datas.merge()
     }
 
-    private static func updateVersionMin(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
+    private static func replaceVersionMin(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
+        var command = build_version_command(cmd: UInt32(LC_BUILD_VERSION),
+                                            cmdsize: UInt32(MemoryLayout<build_version_command>.stride),
+                                            platform: UInt32(PLATFORM_IOSSIMULATOR),
+                                            minos: minos << 16 | 0 << 8 | 0,
+                                            sdk: sdk << 16 | 0 << 8 | 0,
+                                            ntools: 0)
+
+        return Data(bytes: &command, count: MemoryLayout<build_version_command>.stride)
+    }
+
+    private static func updateBuildVersion(_ data: Data, _ offset: UInt32, minos: UInt32, sdk: UInt32) -> Data {
 
         // a build version command consists of 2 parts: the build version header, and an optional list of 'build tool' headers.
         // see https://opensource.apple.com/source/dyld/dyld-519.2.1/dyld3/MachOParser.cpp for the struct definition.
 
-        // In order to ensure we don't change the size of the command, 
+        // In order to ensure we don't change the size of the command,
         // let's just mutate use the memory we already allocated when we read the command in from the object file.
         var data = data
 
@@ -181,7 +192,7 @@ public enum Transmogrifier {
       let cmd = Int32(bitPattern: lc.loadCommand)
       switch cmd {
       case LC_BUILD_VERSION:
-          return updateVersionMin(lc, 0, minos: minos, sdk: sdk)
+          return updateBuildVersion(lc, 0, minos: minos, sdk: sdk)
       default:
           return lc
       }
@@ -196,13 +207,11 @@ public enum Transmogrifier {
           case LC_SEGMENT_64:
               return updateSegment64(lc, offset)
           case LC_VERSION_MIN_IPHONEOS:
-              return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+              return replaceVersionMin(lc, offset, minos: minos, sdk: sdk)
           case LC_DATA_IN_CODE, LC_LINKER_OPTIMIZATION_HINT:
               return updateDataInCode(lc, offset)
           case LC_SYMTAB:
               return updateSymTab(lc, offset)
-          case LC_BUILD_VERSION:
-              return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
           default:
               return lc
       }
@@ -217,7 +226,7 @@ public enum Transmogrifier {
         fatalError("This arm64 binary already contains an LC_BUILD_VERSION load command!")
     }
     if cmd == LC_VERSION_MIN_IPHONEOS {
-        return updateVersionMin(lc, offset, minos: minos, sdk: sdk)
+        return replaceVersionMin(lc, offset, minos: minos, sdk: sdk)
     }
     return lc
   }
